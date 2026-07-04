@@ -1,20 +1,61 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Trash2, Plus, Minus, ShoppingBag, ArrowRight } from "lucide-react";
+import { Trash2, Plus, Minus, ShoppingBag, ArrowRight, LogIn } from "lucide-react";
 import { formatPrice } from "@/lib/utils";
 import { toast } from "sonner";
+import { useAuth } from "@/components/providers/auth-provider";
 
-const INITIAL_ITEMS = [
-  { id: "1", name: "Samsung Galaxy S24 Ultra", variant: "256GB", price: 129999, quantity: 1, image: null },
-  { id: "2", name: "JBL Flip 6 Speaker", variant: null, price: 8999, quantity: 2, image: null },
-  { id: "3", name: "Logitech MX Master 3S", variant: null, price: 9500, quantity: 1, image: null },
-];
+interface CartItem {
+  id: string;
+  name: string;
+  variant: string | null;
+  price: number;
+  quantity: number;
+  image: string | null;
+}
 
 export default function CartPage() {
-  const [items, setItems] = useState(INITIAL_ITEMS);
+  const { user, loading } = useAuth();
+  const [items, setItems] = useState<CartItem[]>([]);
   const [coupon, setCoupon] = useState("");
+  const [hydrated, setHydrated] = useState(false);
+
+  useEffect(() => {
+    if (loading || typeof window === "undefined") return;
+
+    const storageKey = user?.uid ? `medimart-cart-${user.uid}` : "medimart-cart-guest";
+    const stored = window.localStorage.getItem(storageKey);
+
+    if (!user) {
+      setItems([]);
+      window.localStorage.removeItem("medimart-cart-guest");
+      setHydrated(true);
+      return;
+    }
+
+    try {
+      const parsed = stored ? (JSON.parse(stored) as CartItem[]) : [];
+      setItems(Array.isArray(parsed) ? parsed : []);
+    } catch {
+      setItems([]);
+    } finally {
+      setHydrated(true);
+    }
+  }, [user?.uid, loading]);
+
+  useEffect(() => {
+    if (!hydrated || loading || typeof window === "undefined") return;
+
+    if (!user) {
+      window.localStorage.removeItem("medimart-cart-guest");
+      return;
+    }
+
+    const storageKey = `medimart-cart-${user.uid}`;
+    window.localStorage.setItem(storageKey, JSON.stringify(items));
+  }, [items, hydrated, loading, user?.uid]);
 
   const updateQty = (id: string, delta: number) => {
     setItems((prev) =>
@@ -38,8 +79,19 @@ export default function CartPage() {
       <div className="max-w-7xl mx-auto px-4 py-20 text-center">
         <ShoppingBag className="w-20 h-20 text-muted mx-auto mb-4" />
         <h2 className="font-display text-2xl font-bold mb-2">Your cart is empty</h2>
-        <p className="text-muted-foreground mb-8">Start shopping to add items to your cart.</p>
-        <Link href="/products" className="btn-primary">Browse Products</Link>
+        <p className="text-muted-foreground mb-8">
+          {user
+            ? "Save products for later and they’ll stay here for your account."
+            : "Sign in to keep a personal cart and access it across devices."}
+        </p>
+        <div className="flex items-center justify-center gap-3 flex-wrap">
+          <Link href="/products" className="btn-primary">Browse Products</Link>
+          {!user && (
+            <Link href="/login" className="btn-outline inline-flex items-center gap-2">
+              <LogIn className="w-4 h-4" /> Sign In
+            </Link>
+          )}
+        </div>
       </div>
     );
   }
