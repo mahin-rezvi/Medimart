@@ -25,12 +25,8 @@ function validateFirebaseConfig() {
 
 const missingVars = validateFirebaseConfig();
 if (missingVars.length > 0) {
-  console.error(
-    "❌ Firebase Web App configuration incomplete!\n" +
-    "Missing or placeholder environment variables:\n" +
-    missingVars.map(v => `  - ${v}`).join("\n") +
-    "\n\nUpdate the single project .env file with Firebase Web App credentials.\n" +
-    "Get your config from: Firebase Console → Project Settings → Your apps → Web App"
+  console.info(
+    "[firebase] Firebase client SDK is disabled for this project; Clerk and Neon are being used instead."
   );
 }
 

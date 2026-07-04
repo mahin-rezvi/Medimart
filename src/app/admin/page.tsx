@@ -16,24 +16,48 @@ import Link from "next/link";
 
 interface Stats { products: number; orders: number; users: number; revenue: number }
 interface Order {
-  id: string; orderNumber: string;
-  customer: { name: string }; total: number; totalAmount: number;
-  status: string; createdAt: { seconds: number };
+  id: string;
+  orderNumber?: string;
+  customer?: { name?: string };
+  total?: number;
+  totalAmount?: number;
+  status?: string;
+  createdAt?: { seconds?: number } | null;
 }
+interface CategoryStat { name: string; value: number; color: string }
+interface RevenuePoint { day: string; revenue: number }
 
-const CATEGORY_DATA = [
-  { name: "Electronics", value: 35, color: "#0ea5e9" },
-  { name: "Health", value: 28, color: "#8b5cf6" },
-  { name: "Fashion", value: 18, color: "#ec4899" },
-  { name: "Grocery", value: 12, color: "#22c55e" },
-  { name: "Others", value: 7, color: "#f97316" },
-];
+const CATEGORY_COLORS = ["#0ea5e9", "#8b5cf6", "#ec4899", "#22c55e", "#f97316"];
 
-const REVENUE_DATA = [
-  { day: "Mon", revenue: 42000 }, { day: "Tue", revenue: 65000 }, { day: "Wed", revenue: 58000 },
-  { day: "Thu", revenue: 91000 }, { day: "Fri", revenue: 78000 }, { day: "Sat", revenue: 115000 },
-  { day: "Sun", revenue: 98000 },
-];
+const buildRevenueData = (orders: Order[]): RevenuePoint[] => {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const start = new Date(today);
+  start.setDate(today.getDate() - 6);
+
+  const data: RevenuePoint[] = Array.from({ length: 7 }, (_, index) => {
+    const day = new Date(start);
+    day.setDate(start.getDate() + index);
+    return { day: day.toLocaleDateString("en-US", { weekday: "short" }), revenue: 0 };
+  });
+
+  orders.forEach((order) => {
+    const amount = Number(order.total ?? order.totalAmount ?? 0) || 0;
+    if (!amount) return;
+
+    const seconds = order.createdAt?.seconds;
+    if (typeof seconds !== "number") return;
+
+    const createdAt = new Date(seconds * 1000);
+    if (createdAt < start || createdAt > today) return;
+
+    const label = createdAt.toLocaleDateString("en-US", { weekday: "short" });
+    const entry = data.find((item) => item.day === label);
+    if (entry) entry.revenue += amount;
+  });
+
+  return data;
+};
 
 const STATUS_MAP: Record<string, { label: string; className: string }> = {
   PENDING:    { label: "Pending",    className: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400" },
@@ -54,6 +78,8 @@ const QUICK_ACTIONS = [
 export default function AdminDashboard() {
   const [stats, setStats] = useState<Stats>({ products: 0, orders: 0, users: 0, revenue: 0 });
   const [recentOrders, setRecentOrders] = useState<Order[]>([]);
+  const [categoryData, setCategoryData] = useState<CategoryStat[]>([]);
+  const [revenueData, setRevenueData] = useState<RevenuePoint[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -70,9 +96,24 @@ export default function AdminDashboard() {
           getDocs(collection(firestore, "users")),
         ]);
         const orders = ordersSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Order));
-        const revenue = orders.reduce((s, o) => s + (o.total || o.totalAmount || 0), 0);
+        const revenue = orders.reduce((s, o) => s + (Number(o.total ?? o.totalAmount ?? 0) || 0), 0);
+        const categoryMap = new Map<string, number>();
+
+        productsSnap.docs.forEach((doc) => {
+          const data = doc.data() as { category?: string };
+          const category = data.category?.trim() || "Uncategorized";
+          categoryMap.set(category, (categoryMap.get(category) ?? 0) + 1);
+        });
+
+        const derivedCategoryData = Array.from(categoryMap.entries())
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 5)
+          .map(([name, value], index) => ({ name, value, color: CATEGORY_COLORS[index % CATEGORY_COLORS.length] }));
+
         setStats({ products: productsSnap.size, orders: ordersSnap.size, users: usersSnap.size, revenue });
         setRecentOrders(orders.slice(0, 6));
+        setCategoryData(derivedCategoryData);
+        setRevenueData(buildRevenueData(orders));
       } catch (err) { console.error(err); }
       finally { setLoading(false); }
     }
@@ -169,57 +210,66 @@ export default function AdminDashboard() {
           <div className="flex items-center justify-between mb-5">
             <div>
               <h2 className="font-semibold text-sm">Weekly Revenue</h2>
-              <p className="text-xs text-muted-foreground mt-0.5">Sample trend data</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Live revenue from recent orders</p>
             </div>
             <span className="text-xs bg-emerald-50 dark:bg-emerald-950/30 text-emerald-600 px-2.5 py-1 rounded-full font-semibold flex items-center gap-1">
-              <ArrowUpRight className="w-3 h-3" /> +18.5%
+              <ArrowUpRight className="w-3 h-3" /> {stats.revenue > 0 ? formatPrice(stats.revenue) : "No sales yet"}
             </span>
           </div>
-          <ResponsiveContainer width="100%" height={200}>
-            <AreaChart data={REVENUE_DATA}>
-              <defs>
-                <linearGradient id="revenueGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#0284c7" stopOpacity={0.2} />
-                  <stop offset="95%" stopColor="#0284c7" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.04)" />
-              <XAxis dataKey="day" tick={{ fontSize: 11, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }} axisLine={false} tickLine={false} tickFormatter={(v) => `৳${(v / 1000).toFixed(0)}k`} />
-              <Tooltip formatter={(v) => [formatPrice(v as number), "Revenue"]} contentStyle={{ borderRadius: "12px", border: "1px solid #e2e8f0", fontSize: 12 }} />
-              <Area type="monotone" dataKey="revenue" stroke="#0284c7" strokeWidth={2.5} fill="url(#revenueGrad)" dot={false} />
-            </AreaChart>
-          </ResponsiveContainer>
+          {revenueData.some((item) => item.revenue > 0) ? (
+            <ResponsiveContainer width="100%" height={200}>
+              <AreaChart data={revenueData}>
+                <defs>
+                  <linearGradient id="revenueGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#0284c7" stopOpacity={0.2} />
+                    <stop offset="95%" stopColor="#0284c7" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.04)" />
+                <XAxis dataKey="day" tick={{ fontSize: 11, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }} axisLine={false} tickLine={false} tickFormatter={(v) => `৳${(v / 1000).toFixed(0)}k`} />
+                <Tooltip formatter={(v) => [formatPrice(v as number), "Revenue"]} contentStyle={{ borderRadius: "12px", border: "1px solid #e2e8f0", fontSize: 12 }} />
+                <Area type="monotone" dataKey="revenue" stroke="#0284c7" strokeWidth={2.5} fill="url(#revenueGrad)" dot={false} />
+              </AreaChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="h-[200px] flex items-center justify-center rounded-2xl border border-dashed border-border bg-muted/30 text-sm text-muted-foreground">
+              No sales yet. Orders will populate this chart automatically.
+            </div>
+          )}
         </div>
 
         {/* Pie chart */}
         <div className="bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-2xl p-5">
           <h2 className="font-semibold text-sm mb-1">Sales by Category</h2>
           <p className="text-xs text-muted-foreground mb-4">Distribution overview</p>
-          <ResponsiveContainer width="100%" height={140}>
-            <PieChart>
-              <Pie data={CATEGORY_DATA} cx="50%" cy="50%" innerRadius={42} outerRadius={65} paddingAngle={3} dataKey="value" stroke="none">
-                {CATEGORY_DATA.map((e, i) => <Cell key={i} fill={e.color} />)}
-              </Pie>
-              <Tooltip formatter={(v) => [`${v}%`, ""]} contentStyle={{ borderRadius: "10px", fontSize: 12 }} />
-            </PieChart>
-          </ResponsiveContainer>
-          <div className="space-y-2 mt-2">
-            {CATEGORY_DATA.map((cat) => (
-              <div key={cat.name} className="flex items-center justify-between text-xs">
-                <div className="flex items-center gap-2">
-                  <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: cat.color }} />
-                  <span className="text-muted-foreground">{cat.name}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="h-1.5 rounded-full bg-gray-100 dark:bg-gray-800 w-16 overflow-hidden">
-                    <div className="h-full rounded-full" style={{ width: `${cat.value}%`, background: cat.color }} />
+          {categoryData.length > 0 ? (
+            <>
+              <ResponsiveContainer width="100%" height={140}>
+                <PieChart>
+                  <Pie data={categoryData} cx="50%" cy="50%" innerRadius={42} outerRadius={65} paddingAngle={3} dataKey="value" stroke="none">
+                    {categoryData.map((e, i) => <Cell key={i} fill={e.color} />)}
+                  </Pie>
+                  <Tooltip formatter={(v) => [`${v} products`, ""]} contentStyle={{ borderRadius: "10px", fontSize: 12 }} />
+                </PieChart>
+              </ResponsiveContainer>
+              <div className="space-y-2 mt-2">
+                {categoryData.map((cat) => (
+                  <div key={cat.name} className="flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-2">
+                      <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: cat.color }} />
+                      <span className="text-muted-foreground">{cat.name}</span>
+                    </div>
+                    <span className="font-semibold text-right">{cat.value}</span>
                   </div>
-                  <span className="font-semibold w-8 text-right">{cat.value}%</span>
-                </div>
+                ))}
               </div>
-            ))}
-          </div>
+            </>
+          ) : (
+            <div className="h-[140px] flex items-center justify-center rounded-2xl border border-dashed border-border bg-muted/30 text-sm text-muted-foreground">
+              No product categories recorded yet.
+            </div>
+          )}
         </div>
       </div>
 
@@ -247,7 +297,8 @@ export default function AdminDashboard() {
         ) : (
           <div className="divide-y divide-gray-50 dark:divide-gray-800">
             {recentOrders.map((order) => {
-              const status = STATUS_MAP[order.status] ?? { label: order.status, className: "bg-gray-100 text-gray-700" };
+              const statusKey = typeof order.status === "string" ? order.status.toUpperCase() : "";
+              const status = STATUS_MAP[statusKey] ?? { label: order.status ?? "Unknown", className: "bg-gray-100 text-gray-700" };
               return (
                 <div key={order.id} className="flex items-center gap-4 px-5 py-3.5 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
                   <div className="w-8 h-8 rounded-xl bg-brand-50 dark:bg-brand-950/30 flex items-center justify-center shrink-0">

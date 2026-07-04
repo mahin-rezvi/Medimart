@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import ProductCard from "@/components/products/product-card";
-import { SlidersHorizontal, ChevronDown } from "lucide-react";
+import { SlidersHorizontal, ChevronDown, PackageSearch } from "lucide-react";
 
 interface Product {
   id: string;
@@ -17,28 +17,6 @@ interface Product {
   stock: number;
   brand?: string;
 }
-
-const SAMPLE_PRODUCTS: Product[] = Array.from({ length: 16 }, (_, i) => ({
-  id: `p${i}`,
-  name: [
-    "Samsung Galaxy A35",
-    "Lenovo IdeaPad Gaming 3",
-    "JBL Tune 760NC",
-    "HP LaserJet Pro",
-    "Realme Narzo 70",
-    "ASUS VivoBook 16",
-    "Mi Pad 6",
-    "OnePlus 12",
-  ][i % 8],
-  slug: `product-${i}`,
-  price: [32000, 85000, 15000, 28000, 22000, 72000, 45000, 95000][i % 8],
-  discountPrice: [27000, 72000, 11000, 22000, 18000, 62000, 38000, 82000][i % 8],
-  images: [],
-  rating: 4 + (i % 10) * 0.1,
-  reviewCount: 50 + i * 23,
-  stock: 5 + i,
-  brand: ["Samsung", "Lenovo", "JBL", "HP", "Realme", "ASUS", "Xiaomi", "OnePlus"][i % 8],
-}));
 
 const SORT_OPTIONS = [
   { value: "newest", label: "Newest First" },
@@ -58,7 +36,7 @@ const PRICE_RANGES = [
 
 export default function ProductsClientPage() {
   const searchParams = useSearchParams();
-  const [products, setProducts] = useState<Product[]>(SAMPLE_PRODUCTS);
+  const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -84,10 +62,10 @@ export default function ProductsClientPage() {
           throw new Error(data?.error || "Failed to load products");
         }
 
-        setProducts((data.products && data.products.length > 0) ? data.products : SAMPLE_PRODUCTS);
+        setProducts(Array.isArray(data.products) ? data.products : []);
       } catch (err: unknown) {
         setError(err instanceof Error ? err.message : "Unable to load products");
-        setProducts(SAMPLE_PRODUCTS);
+        setProducts([]);
       } finally {
         if (!ignore) setLoading(false);
       }
@@ -179,6 +157,14 @@ export default function ProductsClientPage() {
               {Array.from({ length: 8 }).map((_, index) => (
                 <div key={index} className="h-72 animate-pulse rounded-3xl bg-muted" />
               ))}
+            </div>
+          ) : products.length === 0 ? (
+            <div className="rounded-3xl border border-dashed border-border bg-card/60 p-10 text-center">
+              <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-brand-50 dark:bg-brand-950/30 text-brand-600 mb-4">
+                <PackageSearch className="w-6 h-6" />
+              </div>
+              <h3 className="font-semibold text-foreground">No products available yet</h3>
+              <p className="text-sm text-muted-foreground mt-1">Products added in the admin panel will appear here automatically.</p>
             </div>
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
