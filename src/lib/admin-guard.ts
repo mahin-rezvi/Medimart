@@ -1,21 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
-import { adminAuth, adminDb } from "@/lib/firebase-admin";
+import { auth } from "@clerk/nextjs/server";
 
 const ADMIN_ROLES = new Set(["ADMIN", "SUPER_ADMIN"]);
 
-export async function requireAdmin(req: NextRequest) {
-  const token = req.cookies.get("__session")?.value;
-
-  if (!token) {
-    return {
-      error: NextResponse.json({ error: "Authentication required" }, { status: 401 }),
-    };
-  }
-
+export async function requireAdmin(_req: NextRequest) {
   try {
-    const decoded = await adminAuth().verifyIdToken(token);
-    const userSnap = await adminDb().collection("users").doc(decoded.uid).get();
-    const role = userSnap.exists ? userSnap.data()?.role : null;
+    const { userId, sessionClaims } = await auth();
+
+    if (!userId) {
+      return {
+        error: NextResponse.json({ error: "Authentication required" }, { status: 401 }),
+      };
+    }
+
+    const publicMetadata = sessionClaims?.publicMetadata as { role?: string } | undefined;
+    const role = (sessionClaims?.role as string | undefined) ?? publicMetadata?.role ?? "CUSTOMER";
 
     if (!ADMIN_ROLES.has(role)) {
       return {
@@ -23,7 +22,7 @@ export async function requireAdmin(req: NextRequest) {
       };
     }
 
-    return { uid: decoded.uid, role };
+    return { uid: userId, role };
   } catch (err) {
     console.error("[admin-guard] Failed to verify admin session:", err);
     return {

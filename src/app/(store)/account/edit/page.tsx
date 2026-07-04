@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { updateProfile } from "firebase/auth";
 import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
 import { ArrowLeft, Camera, Loader2, Save, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
@@ -72,11 +71,6 @@ export default function AccountEditPage() {
     }
     setSaving(true);
     try {
-      await updateProfile(user, {
-        displayName: form.displayName.trim(),
-        photoURL: form.photoURL.trim() || null,
-      });
-
       if (db) {
         try {
           await setDoc(

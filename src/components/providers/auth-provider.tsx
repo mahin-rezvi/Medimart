@@ -1,13 +1,15 @@
 "use client";
 
-import React, { createContext, useContext, useEffect, useState } from "react";
-import { type User } from "firebase/auth";
-import { doc, getDoc } from "firebase/firestore";
-import { auth, db, FIREBASE_CONFIGURED } from "@/lib/firebase";
-import { onAuthStateChanged, signOut } from "@/lib/firebase-auth";
+import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { useAuth as useClerkAuth, useUser } from "@clerk/nextjs";
 
-interface AuthUser extends User {
+interface AuthUser {
+  uid: string;
+  displayName?: string | null;
+  email?: string | null;
+  photoURL?: string | null;
   role?: string;
+  phoneNumber?: string | null;
 }
 
 interface AuthContextType {
@@ -24,56 +26,66 @@ const AuthContext = createContext<AuthContextType>({
   signOut: async () => {},
 });
 
-export function AuthProvider({ children }: { children: React.ReactNode }) {
+const fallbackValue: AuthContextType = {
+  user: null,
+  loading: false,
+  isAdmin: false,
+  signOut: async () => {},
+};
+
+function ClerkAuthBridge({ children }: { children: React.ReactNode }) {
+  const { isLoaded, signOut: clerkSignOut } = useClerkAuth();
+  const { isLoaded: userLoaded, user: clerkUser } = useUser();
   const [user, setUser] = useState<AuthUser | null>(null);
-  const [loading, setLoading] = useState(!auth ? false : true);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!auth) {
-      console.warn("[AuthProvider] Firebase Auth not initialized. Auth features disabled. Check environment variables.");
+    if (!isLoaded || !userLoaded) {
+      setLoading(true);
       return;
     }
 
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      if (firebaseUser) {
-        const token = await firebaseUser.getIdToken();
-        document.cookie = `__session=${encodeURIComponent(token)}; Path=/; Max-Age=3600; SameSite=Lax`;
+    if (clerkUser) {
+      const role = (clerkUser.publicMetadata?.role as string | undefined) ?? "CUSTOMER";
+      setUser({
+        uid: clerkUser.id,
+        displayName: clerkUser.fullName ?? clerkUser.firstName ?? clerkUser.username ?? null,
+        email: clerkUser.primaryEmailAddress?.emailAddress ?? null,
+        photoURL: clerkUser.imageUrl ?? null,
+        role,
+        phoneNumber: clerkUser.phoneNumbers?.[0]?.phoneNumber ?? null,
+      });
+    } else {
+      setUser(null);
+    }
 
-        // Fetch role from Firestore if configured; otherwise default to CUSTOMER
-        try {
-          if (FIREBASE_CONFIGURED && db) {
-            const snap = await getDoc(doc(db, "users", firebaseUser.uid));
-            const role = snap.exists() ? snap.data().role : "CUSTOMER";
-            setUser({ ...firebaseUser, role });
-          } else {
-            setUser({ ...firebaseUser, role: "CUSTOMER" });
-          }
-        } catch (err) {
-          // If Firestore fails, don't block auth — fallback to CUSTOMER
-          console.warn("[auth-provider] Failed to read user role:", err);
-          setUser({ ...firebaseUser, role: "CUSTOMER" });
-        }
-      } else {
-        document.cookie = "__session=; Path=/; Max-Age=0; SameSite=Lax";
-        setUser(null);
+    setLoading(false);
+  }, [clerkUser, isLoaded, userLoaded]);
+
+  const value = useMemo<AuthContextType>(() => ({
+    user,
+    loading,
+    isAdmin: user?.role === "ADMIN" || user?.role === "SUPER_ADMIN",
+    signOut: async () => {
+      try {
+        await clerkSignOut();
+      } catch (err) {
+        console.warn("[auth-provider] Clerk sign-out failed:", err);
       }
-      setLoading(false);
-    });
-    return unsubscribe;
-  }, []);
+    },
+  }), [clerkSignOut, loading, user]);
 
-  return (
-    <AuthContext.Provider
-      value={{
-        user,
-        loading,
-        isAdmin: user?.role === "ADMIN" || user?.role === "SUPER_ADMIN",
-        signOut,
-      }}
-    >
-      {children}
-    </AuthContext.Provider>
-  );
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+}
+
+export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const publishableKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+
+  if (!publishableKey) {
+    return <AuthContext.Provider value={fallbackValue}>{children}</AuthContext.Provider>;
+  }
+
+  return <ClerkAuthBridge>{children}</ClerkAuthBridge>;
 }
 
 export function useAuth() {
