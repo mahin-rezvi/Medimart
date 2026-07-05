@@ -2,8 +2,6 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { Plus, Edit, Trash2, RefreshCw } from "lucide-react";
-import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, serverTimestamp, orderBy, query } from "firebase/firestore";
-import { db, FIREBASE_CONFIGURED } from "@/lib/firebase";
 import { toast } from "sonner";
 import { slugify } from "@/lib/utils";
 
@@ -20,13 +18,15 @@ export default function AdminCategoriesPage() {
 
   const fetchCategories = useCallback(async () => {
     setLoading(true);
-    if (!FIREBASE_CONFIGURED || !db) { setLoading(false); return; }
     try {
-      const firestore = db;
-      const snap = await getDocs(query(collection(firestore, "categories"), orderBy("name")));
-      setCategories(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Category)));
-    } catch { toast.error("Failed to load categories"); }
-    finally { setLoading(false); }
+      const res = await fetch("/api/admin/categories");
+      const data = await res.json();
+      setCategories((data.categories ?? []).map((row: Category) => ({ ...row, isActive: Boolean(row.isActive) })));
+    } catch {
+      toast.error("Failed to load categories");
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -37,15 +37,23 @@ export default function AdminCategoriesPage() {
     if (!form.name) { toast.error("Name is required"); return; }
     const slug = slugify(form.name);
     try {
-      if (!FIREBASE_CONFIGURED || !db) { toast.error("Firestore not initialized"); return; }
-      const firestore = db;
       if (editId) {
-        await updateDoc(doc(firestore, "categories", editId), { ...form, slug });
-        setCategories((prev) => prev.map((c) => c.id === editId ? { ...c, ...form, slug } : c));
+        await fetch("/api/admin/categories", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: editId, name: form.name, slug, icon: form.icon, isActive: form.isActive }),
+        });
+        setCategories((prev) => prev.map((c) => c.id === editId ? { ...c, name: form.name, slug, icon: form.icon, isActive: form.isActive } : c));
         toast.success("Category updated");
       } else {
-        const ref = await addDoc(collection(firestore, "categories"), { ...form, slug, createdAt: serverTimestamp() });
-        setCategories((prev) => [...prev, { id: ref.id, ...form, slug }]);
+        const res = await fetch("/api/admin/categories", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: form.name, slug, icon: form.icon, isActive: form.isActive }),
+        });
+        const data = await res.json();
+        const insertedId = data.id ?? slug;
+        setCategories((prev) => [...prev, { id: insertedId, name: form.name, slug, icon: form.icon, isActive: form.isActive }]);
         toast.success("Category created");
       }
       setForm({ name: "", icon: "📦", isActive: true });
@@ -59,12 +67,16 @@ export default function AdminCategoriesPage() {
   const handleDelete = async (id: string, name: string) => {
     if (!confirm(`Delete "${name}"?`)) return;
     try {
-      if (!FIREBASE_CONFIGURED || !db) { toast.error("Firestore not initialized"); return; }
-      const firestore = db;
-      await deleteDoc(doc(firestore, "categories", id));
-      setCategories((prev) => prev.filter((c) => c.id !== id)); toast.success("Deleted");
+      await fetch("/api/admin/categories", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      setCategories((prev) => prev.filter((c) => c.id !== id));
+      toast.success("Deleted");
+    } catch {
+      toast.error("Delete failed");
     }
-    catch { toast.error("Delete failed"); }
   };
 
   return (

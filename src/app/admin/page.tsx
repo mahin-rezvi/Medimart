@@ -1,8 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { collection, getDocs, query, orderBy, limit } from "firebase/firestore";
-import { db, FIREBASE_CONFIGURED } from "@/lib/firebase";
 import {
   ShoppingCart, Package, Users, TrendingUp, ArrowUpRight,
   Eye, Zap, Clock, BarChart2,
@@ -84,39 +82,41 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     async function fetchStats() {
-      if (!FIREBASE_CONFIGURED || !db) {
-        setLoading(false);
-        return;
-      }
-      const firestore = db;
+      setLoading(true);
+
       try {
-        const [productsSnap, ordersSnap, usersSnap] = await Promise.all([
-          getDocs(collection(firestore, "products")),
-          getDocs(query(collection(firestore, "orders"), orderBy("createdAt", "desc"), limit(50))),
-          getDocs(collection(firestore, "users")),
-        ]);
-        const orders = ordersSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Order));
-        const revenue = orders.reduce((s, o) => s + (Number(o.total ?? o.totalAmount ?? 0) || 0), 0);
-        const categoryMap = new Map<string, number>();
+        const res = await fetch("/api/admin/dashboard");
+        const data = await res.json();
+        const mappedOrders: Order[] = (data.recentOrders ?? []).map((row: { id: string; customer?: { name?: string }; total?: number; status?: string; createdAt?: { seconds: number } | null }) => ({
+          id: row.id,
+          customer: { name: row.customer?.name || "Guest" },
+          total: Number(row.total ?? 0),
+          status: row.status ?? "UNKNOWN",
+          createdAt: row.createdAt ? { seconds: row.createdAt.seconds } : null,
+        }));
 
-        productsSnap.docs.forEach((doc) => {
-          const data = doc.data() as { category?: string };
-          const category = data.category?.trim() || "Uncategorized";
-          categoryMap.set(category, (categoryMap.get(category) ?? 0) + 1);
+        const derivedCategoryData = (data.categories ?? []).map((row: { name?: string; value?: number }, index: number) => ({
+          name: row.name ?? "Uncategorized",
+          value: Number(row.value ?? 0),
+          color: CATEGORY_COLORS[index % CATEGORY_COLORS.length],
+        }));
+
+        setStats({
+          products: Number(data.stats?.products ?? 0),
+          orders: Number(data.stats?.orders ?? 0),
+          users: Number(data.stats?.users ?? 0),
+          revenue: Number(data.stats?.revenue ?? 0),
         });
-
-        const derivedCategoryData = Array.from(categoryMap.entries())
-          .sort((a, b) => b[1] - a[1])
-          .slice(0, 5)
-          .map(([name, value], index) => ({ name, value, color: CATEGORY_COLORS[index % CATEGORY_COLORS.length] }));
-
-        setStats({ products: productsSnap.size, orders: ordersSnap.size, users: usersSnap.size, revenue });
-        setRecentOrders(orders.slice(0, 6));
+        setRecentOrders(mappedOrders);
         setCategoryData(derivedCategoryData);
-        setRevenueData(buildRevenueData(orders));
-      } catch (err) { console.error(err); }
-      finally { setLoading(false); }
+        setRevenueData(buildRevenueData(mappedOrders));
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setLoading(false);
+      }
     }
+
     fetchStats();
   }, []);
 
@@ -154,7 +154,7 @@ export default function AdminDashboard() {
         <div className="relative z-10">
           <p className="text-white/60 text-sm font-medium mb-1">Good day, Admin 👋</p>
           <h1 className="font-display text-2xl font-black text-white mb-1">Dashboard Overview</h1>
-          <p className="text-white/50 text-sm">Real-time data from your Firestore database</p>
+          <p className="text-white/50 text-sm">Real-time data from your Neon database</p>
         </div>
       </div>
 
@@ -278,7 +278,7 @@ export default function AdminDashboard() {
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-800">
           <div>
             <h2 className="font-semibold text-sm">Recent Orders</h2>
-            <p className="text-xs text-muted-foreground mt-0.5">Latest transactions from Firestore</p>
+            <p className="text-xs text-muted-foreground mt-0.5">Latest transactions from your database</p>
           </div>
           <Link href="/admin/orders" className="text-xs font-semibold text-brand-600 hover:underline flex items-center gap-1">
             View All <ArrowUpRight className="w-3 h-3" />
